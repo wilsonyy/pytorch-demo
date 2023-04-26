@@ -1,0 +1,5 @@
+numpy
+PIL
+requests
+scipy
+opencv-python
