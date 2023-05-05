@@ -4,7 +4,7 @@ import argparse
 from torch import optim, nn, autograd
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader
-from torchvision import transforms
+from torchvision import transforms, models
 
 from dataset import *
 from model import *
@@ -51,6 +51,48 @@ def test(model, device, test_loader):
     print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
         test_loss, correct, len(test_loader.dataset),
         100. * correct / len(test_loader.dataset)))
+
+
+# 在数据量小的情况可以采用将前面的网络层冻结，只训练后面fc层。
+def set_parameter_requires_grad(model, feature_extracting):
+    if feature_extracting:
+        for param in model.parameters():
+            # 如需训练改为True
+            param.requires_grad = False
+
+
+def initialize_model(model_name, num_classes, feature_extract, use_pretrained=True):
+    # 选择合适的模型，不同模型的初始化方法稍微有点区别
+    model_ft = None
+
+    if model_name == "resnet":
+        """ Resnet50
+        """
+        model_ft = models.resnet50(pretrained=use_pretrained)
+        # 由于训练集单通道，所以需要调整模型第一层的上输入维度为1
+        model_ft.conv1 = nn.Conv2d(1, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+        set_parameter_requires_grad(model_ft, feature_extract)
+
+        # 保持in_features不变，修改out_features=10
+        num_ftrs = model_ft.fc.in_features
+        model_ft.fc = nn.Sequential(nn.Linear(num_ftrs, num_classes), nn.LogSoftmax(dim=1))
+        print(model_ft)
+
+    elif model_name == "mobilenet":
+        """ MobileNetV2
+        """
+        model_ft = models.mobilenet_v2(pretrained=use_pretrained)
+        # 由于训练集单通道，所以需要调整模型第一层的上输入维度为1
+        model_ft.features[0][0] = nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
+        set_parameter_requires_grad(model_ft, feature_extract)
+        # 保持in_features不变，修改out_features=10
+        num_ftrs = model_ft.classifier[1].in_features
+        model_ft.classifier[1] = nn.Linear(num_ftrs, num_classes, bias=True)
+        print(model_ft)
+
+    else:
+        model_ft = MyModel()
+    return model_ft
 
 
 def main():
@@ -103,7 +145,7 @@ def main():
     train_loader = torch.utils.data.DataLoader(dataset1, **train_kwargs)
     test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
 
-    model = MyModel().to(device)  # CPU/GPU
+    model = initialize_model('mobilenet', 10, False).to(device)  # CPU/GPU
     optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
 
     scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
